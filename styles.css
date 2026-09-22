@@ -132,3 +132,5 @@ textarea { min-height: 76px; resize: vertical; }
 .sheet-title { font-size: 17px; font-weight: 700; }
 .sheet-text { margin: 0 0 6px; font-size: 14px; color: var(--muted); line-height: 1.45; }
 .sheet-card .btn-primary, .sheet-card .btn-secondary { flex: none; width: 100%; }
+
+.empty .tiny { font-size: 12.5px; line-height: 1.5; max-width: 34ch; margin: 18px auto 0; opacity: .85; }
