@@ -31,8 +31,17 @@ const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
 /* ---------------------------- storage ----------------------------- */
 function loadBottles() {
-  try { return JSON.parse(localStorage.getItem(LS.bottles) || "[]"); }
+  let list;
+  try { list = JSON.parse(localStorage.getItem(LS.bottles) || "[]"); }
   catch { return []; }
+  if (!Array.isArray(list)) return [];
+  list = list.filter((b) => b && typeof b === "object");
+  // Earlier imports could store rows with a blank id; give each its own.
+  if (list.some((b) => !b.id)) {
+    list = list.map((b) => (b.id ? b : { ...b, id: uid() }));
+    saveBottles(list);
+  }
+  return list;
 }
 function saveBottles(list) {
   try { localStorage.setItem(LS.bottles, JSON.stringify(list)); }
@@ -46,6 +55,7 @@ const getWorkspace = () => localStorage.getItem(LS.workspace) || "";
 const $ = (id) => document.getElementById(id);
 const views = { list: $("view-list"), edit: $("view-edit"), settings: $("view-settings") };
 function show(view) {
+  if (view !== "edit") cancelRead();
   Object.values(views).forEach((v) => v.classList.add("hidden"));
   views[view].classList.remove("hidden");
   $("btn-add").classList.toggle("hidden", view !== "list");
@@ -104,6 +114,7 @@ function readForm() {
 }
 
 function openEdit(bottle) {
+  cancelRead();
   editingId = bottle.id;
   draft = { ...bottle };
   $("edit-title").textContent = "Edit bottle";
@@ -149,6 +160,14 @@ function deleteBottle() {
 
 /* ------------------------- label reading -------------------------- */
 let pendingFront = null;   // front image held while we ask about the back
+let readSeq = 0;           // bumped whenever a label read should be ignored
+let readAbort = null;      // aborts the in-flight label request
+const READ_TIMEOUT_MS = 45000;
+
+function cancelRead() {
+  readSeq++;
+  if (readAbort) { readAbort.abort(); readAbort = null; }
+}
 
 async function handleFrontPhoto(file) {
   if (!file) return;
@@ -167,22 +186,38 @@ async function handleFrontPhoto(file) {
 }
 
 async function runExtraction(front, back) {
+  pendingFront = null;
   openConfirm({});                       // show form immediately
+  cancelRead();                          // only the newest read may fill the form
+  const seq = readSeq;
+  const ctrl = new AbortController();
+  readAbort = ctrl;
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, READ_TIMEOUT_MS);
+
   const status = $("extract-status");
   status.className = "extract-status";
   status.innerHTML = `<span class="spinner"></span><span>Reading ${back ? "both labels" : "the label"}…</span>`;
   status.classList.remove("hidden");
   try {
-    const fields = await readLabel(front, back);
-    draft = { ...draft, ...fields };
-    buildForm(draft);
+    const fields = await readLabel(front, back, ctrl.signal);
+    if (seq !== readSeq) return;         // user left this form; drop the result
+    // Fill only fields the user hasn't typed into while we were waiting.
+    for (const [k, v] of Object.entries(fields)) {
+      const input = $(`f-${k}`);
+      if (input && !input.value.trim()) input.value = v;
+    }
+    draft = { ...draft, ...readForm() };
     status.classList.add("hidden");
     toast("Check the fields, then save");
   } catch (err) {
+    if (seq !== readSeq) return;
+    const msg = timedOut ? "it took too long (check your signal)" : (err.message || err);
     status.className = "extract-status err";
-    status.textContent = "Couldn't read the label: " + (err.message || err) + ". Enter the details by hand.";
+    status.textContent = "Couldn't read the label: " + msg + ". Enter the details by hand.";
   } finally {
-    pendingFront = null;
+    clearTimeout(timer);
+    if (readAbort === ctrl) readAbort = null;
   }
 }
 
@@ -205,7 +240,7 @@ function downscale(file, max = 1568, quality = 0.8) {
   });
 }
 
-async function readLabel(frontB64, backB64) {
+async function readLabel(frontB64, backB64, signal) {
   const wanted = FIELDS.filter((f) => f.fromLabel);
   const keyList = wanted.map((f) => `"${f.key}"`).join(", ");
   const descr = wanted.map((f) => `- ${f.key}: ${f.label}`).join("\n");
@@ -241,6 +276,7 @@ Use an empty string "" for anything not clearly legible. Do not guess or invent 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers,
+    signal,
     body: JSON.stringify({
       model: getModel(),
       max_tokens: 1024,
@@ -300,10 +336,25 @@ async function importFile(file) {
     list = file.name.endsWith(".json") ? JSON.parse(text) : parseCSV(text);
   } catch (e) { toast("Could not read that file"); return; }
   if (!Array.isArray(list)) { toast("File format not recognized"); return; }
-  list = list.map((b) => ({ id: b.id || uid(), date_added: b.date_added || new Date().toISOString(), ...b }));
-  saveBottles(list);
+  list = list.filter((b) => b && typeof b === "object");
+  if (!list.some((b) => FIELDS.some((f) => f.key in b))) {
+    toast("No Cellar columns in that file, nothing imported");
+    return;
+  }
+  // Merge by id: matching bottles are updated, new ones added, nothing removed.
+  // id/date_added go last so a blank cell (a row added by hand) still gets one.
+  const now = new Date().toISOString();
+  const byId = new Map(loadBottles().map((b) => [b.id, b]));
+  let added = 0, updated = 0;
+  for (const b of list) {
+    const id = b.id || uid();
+    const prev = byId.get(id);
+    byId.set(id, { ...prev, ...b, id, date_added: b.date_added || prev?.date_added || now });
+    prev ? updated++ : added++;
+  }
+  saveBottles([...byId.values()]);
   renderList();
-  toast(`Imported ${list.length} bottle(s)`);
+  toast(`Imported: ${added} new, ${updated} updated`);
   openSettings();
 }
 function parseCSV(text) {

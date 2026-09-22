@@ -29,6 +29,8 @@ build against one we kept the catalog self-contained and portable:
 - **Export CSV** — open it in Google Sheets / Excel, edit by hand, done.
 - **Export JSON** — a full backup.
 - **Import** — load a CSV or JSON back in (edit in a spreadsheet, re-import).
+  Import merges: rows with a matching `id` are updated, new rows are added,
+  and nothing already on the device is removed.
 
 So it stays lightweight and hand-editable, and if you later want it in a real
 Google Sheet, the CSV drops straight in.
