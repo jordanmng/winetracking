@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#5b1a2e" />
+  <title>Cellar</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Cellar" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- App bar -->
+  <header class="appbar">
+    <h1 class="brand">Cellar</h1>
+    <button id="btn-settings" class="icon-btn" aria-label="Settings">&#9881;</button>
+  </header>
+
+  <main id="main">
+    <!-- LIST VIEW -->
+    <section id="view-list" class="view">
+      <div id="empty" class="empty hidden">
+        <div class="empty-glass">&#127863;</div>
+        <p>No bottles yet.</p>
+        <p class="muted">Tap the button below and snap a label.</p>
+      </div>
+      <ul id="bottle-list" class="bottle-list"></ul>
+    </section>
+
+    <!-- CONFIRM / EDIT VIEW -->
+    <section id="view-edit" class="view hidden">
+      <div class="edit-head">
+        <button class="link-btn" id="edit-cancel">&#8592; Cancel</button>
+        <span id="edit-title" class="edit-title">Confirm bottle</span>
+        <span></span>
+      </div>
+      <div id="extract-status" class="extract-status hidden"></div>
+      <form id="edit-form" class="form"></form>
+      <div class="form-actions">
+        <button type="button" class="btn-secondary" id="edit-delete">Delete</button>
+        <button type="button" class="btn-primary" id="edit-save">Save bottle</button>
+      </div>
+    </section>
+
+    <!-- SETTINGS VIEW -->
+    <section id="view-settings" class="view hidden">
+      <div class="edit-head">
+        <button class="link-btn" id="settings-back">&#8592; Back</button>
+        <span class="edit-title">Settings</span>
+        <span></span>
+      </div>
+      <div class="form">
+        <label class="field">
+          <span class="field-label">Anthropic API key</span>
+          <input type="password" id="set-apikey" placeholder="sk-ant-..." autocomplete="off" />
+          <span class="hint">Stored only on this device. Used to read labels. <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key</a>.</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Model</span>
+          <input type="text" id="set-model" placeholder="claude-haiku-4-5-20251001" />
+          <span class="hint">Haiku is cheapest (a fraction of a cent per bottle). Use a Sonnet model for tougher labels.</span>
+        </label>
+        <div class="form-actions">
+          <button type="button" class="btn-primary" id="settings-save">Save</button>
+        </div>
+        <hr class="rule" />
+        <div class="field-label">Your data</div>
+        <span class="hint">Everything lives on this device. Export to back up or hand-edit, then import to restore.</span>
+        <div class="data-actions">
+          <button type="button" class="btn-secondary" id="export-csv">Export CSV</button>
+          <button type="button" class="btn-secondary" id="export-json">Export JSON</button>
+          <button type="button" class="btn-secondary" id="import-btn">Import file</button>
+          <input type="file" id="import-file" accept=".csv,.json,application/json,text/csv" hidden />
+        </div>
+        <p class="hint" id="count-line"></p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Floating add button + hidden camera input -->
+  <button id="btn-add" class="fab" aria-label="Add bottle">
+    <span class="fab-plus">+</span>
+  </button>
+  <input type="file" id="camera-input" accept="image/*" capture="environment" hidden />
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
