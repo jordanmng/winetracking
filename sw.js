@@ -1,5 +1,5 @@
 // Minimal offline cache for the app shell. Bump VERSION to force refresh.
-const VERSION = "cellar-v2";
+const VERSION = "cellar-v3";
 const SHELL = ["./", "index.html", "app.js", "styles.css", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png"];
 

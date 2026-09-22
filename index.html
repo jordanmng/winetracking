@@ -90,6 +90,17 @@
     <span class="fab-plus">+</span>
   </button>
   <input type="file" id="camera-input" accept="image/*" capture="environment" hidden />
+  <input type="file" id="camera-input-back" accept="image/*" capture="environment" hidden />
+
+  <!-- Asked after the front shot; the back label is always optional. -->
+  <div id="back-sheet" class="sheet hidden">
+    <div class="sheet-card">
+      <div class="sheet-title">Add the back label?</div>
+      <p class="sheet-text">ABV, importer and country of origin are usually printed on the back. Skip it if the front says enough.</p>
+      <button type="button" class="btn-primary" id="back-snap">Snap the back</button>
+      <button type="button" class="btn-secondary" id="back-skip">Skip, read the front</button>
+    </div>
+  </div>
 
   <div id="toast" class="toast hidden"></div>
 

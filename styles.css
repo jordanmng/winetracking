@@ -116,3 +116,19 @@ textarea { min-height: 76px; resize: vertical; }
   background: #2a2024; color: #fff; padding: 11px 16px; border-radius: 10px;
   font-size: 14px; box-shadow: 0 4px 14px rgba(0,0,0,.25); max-width: 88%;
 }
+
+/* Back-label prompt */
+.sheet {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(20,12,16,.45);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.sheet-card {
+  background: var(--card); width: 100%; max-width: 640px;
+  border-radius: 18px 18px 0 0; padding: 22px 20px calc(22px + var(--safe-bot));
+  display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 -6px 24px rgba(0,0,0,.2);
+}
+.sheet-title { font-size: 17px; font-weight: 700; }
+.sheet-text { margin: 0 0 6px; font-size: 14px; color: var(--muted); line-height: 1.45; }
+.sheet-card .btn-primary, .sheet-card .btn-secondary { flex: none; width: 100%; }

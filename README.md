@@ -2,10 +2,16 @@
 
 A tiny web app for cataloging wine bottles from a photo of the label.
 
-Tap **+**, snap the label, and Cellar reads it and pre-fills the details
+Tap **+**, snap the front label, and Cellar reads it and pre-fills the details
 (name, producer, vintage, vineyard/region, grape, country, ABV). You check
 and correct the fields, add price / rating / date / location / notes, and
-save. The **photo is never stored** — only the details you confirm.
+save. The **photos are never stored** — only the details you confirm.
+
+After the front shot it offers an **optional back-label photo**. Some fronts
+(natural wine, design-led producers) carry almost no text, while the back is
+where ABV, the importer and the country of origin are usually printed. One tap
+skips it. Both images go to the model in a single request, so it reconciles
+front against back itself rather than merging two separate readings.
 
 It's a PWA, so you can add it to your iPhone home screen and it opens
 full-screen with the camera one tap away.

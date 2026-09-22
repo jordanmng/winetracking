@@ -148,21 +148,32 @@ function deleteBottle() {
 }
 
 /* ------------------------- label reading -------------------------- */
-async function handlePhoto(file) {
+let pendingFront = null;   // front image held while we ask about the back
+
+async function handleFrontPhoto(file) {
   if (!file) return;
   if (!getKey()) {
     toast("Add your API key in Settings first");
     openSettings();
     return;
   }
+  try {
+    pendingFront = await downscale(file);
+  } catch {
+    toast("Couldn't read that photo");
+    return;
+  }
+  $("back-sheet").classList.remove("hidden");
+}
+
+async function runExtraction(front, back) {
   openConfirm({});                       // show form immediately
   const status = $("extract-status");
   status.className = "extract-status";
-  status.innerHTML = `<span class="spinner"></span><span>Reading the label…</span>`;
+  status.innerHTML = `<span class="spinner"></span><span>Reading ${back ? "both labels" : "the label"}…</span>`;
   status.classList.remove("hidden");
   try {
-    const b64 = await downscale(file);
-    const fields = await readLabel(b64);
+    const fields = await readLabel(front, back);
     draft = { ...draft, ...fields };
     buildForm(draft);
     status.classList.add("hidden");
@@ -170,6 +181,8 @@ async function handlePhoto(file) {
   } catch (err) {
     status.className = "extract-status err";
     status.textContent = "Couldn't read the label: " + (err.message || err) + ". Enter the details by hand.";
+  } finally {
+    pendingFront = null;
   }
 }
 
@@ -192,16 +205,28 @@ function downscale(file, max = 1568, quality = 0.8) {
   });
 }
 
-async function readLabel(b64) {
+async function readLabel(frontB64, backB64) {
   const wanted = FIELDS.filter((f) => f.fromLabel);
   const keyList = wanted.map((f) => `"${f.key}"`).join(", ");
   const descr = wanted.map((f) => `- ${f.key}: ${f.label}`).join("\n");
   const prompt =
-`You are reading a photo of a wine bottle label. Extract these fields:
+`You are reading ${backB64 ? "photos" : "a photo"} of a single wine bottle. Extract these fields:
 ${descr}
+${backB64 ? `
+The front usually carries the producer, wine name and vintage. The back usually carries ABV, importer, country of origin and sometimes the appellation. Use whichever image shows a detail most clearly, and make sure the result describes one wine.` : ""}
 
 Return ONLY a JSON object with exactly these keys: ${keyList}.
-Use an empty string "" for anything not clearly legible on the label. Do not guess or invent details. Return the JSON and nothing else.`;
+Use an empty string "" for anything not clearly legible. Do not guess or invent details. Return the JSON and nothing else.`;
+
+  // Both images go in ONE request so the model can reconcile them itself.
+  const content = [];
+  content.push({ type: "text", text: backB64 ? "Image 1 \u2014 the FRONT of the bottle." : "The front of the bottle." });
+  content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: frontB64 } });
+  if (backB64) {
+    content.push({ type: "text", text: "Image 2 \u2014 the BACK label of the same bottle." });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: backB64 } });
+  }
+  content.push({ type: "text", text: prompt });
 
   const headers = {
     "content-type": "application/json",
@@ -219,13 +244,7 @@ Use an empty string "" for anything not clearly legible on the label. Do not gue
     body: JSON.stringify({
       model: getModel(),
       max_tokens: 1024,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
-          { type: "text", text: prompt },
-        ],
-      }],
+      messages: [{ role: "user", content }],
     }),
   });
   if (!res.ok) {
@@ -335,7 +354,21 @@ function toast(msg) {
 
 /* ------------------------------ wire ------------------------------ */
 $("btn-add").onclick = () => $("camera-input").click();
-$("camera-input").onchange = (e) => { handlePhoto(e.target.files[0]); e.target.value = ""; };
+$("camera-input").onchange = (e) => { handleFrontPhoto(e.target.files[0]); e.target.value = ""; };
+$("back-snap").onclick = () => $("camera-input-back").click();
+$("back-skip").onclick = () => {
+  $("back-sheet").classList.add("hidden");
+  runExtraction(pendingFront, null);
+};
+$("camera-input-back").onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;                        // camera cancelled: leave the sheet up
+  $("back-sheet").classList.add("hidden");
+  let back = null;
+  try { back = await downscale(f); } catch { toast("Couldn't read the back photo"); }
+  runExtraction(pendingFront, back);
+};
 $("btn-settings").onclick = openSettings;
 $("settings-back").onclick = () => show("list");
 $("settings-save").onclick = saveSettings;
