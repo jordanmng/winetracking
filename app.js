@@ -25,6 +25,7 @@ const LS = {
   bottles: "cellar:bottles",
   apikey:  "cellar:apikey",
   model:   "cellar:model",
+  workspace: "cellar:workspace",
 };
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
@@ -39,6 +40,7 @@ function saveBottles(list) {
 }
 const getKey   = () => localStorage.getItem(LS.apikey) || "";
 const getModel = () => localStorage.getItem(LS.model) || DEFAULT_MODEL;
+const getWorkspace = () => localStorage.getItem(LS.workspace) || "";
 
 /* ------------------------------ dom ------------------------------- */
 const $ = (id) => document.getElementById(id);
@@ -201,14 +203,19 @@ ${descr}
 Return ONLY a JSON object with exactly these keys: ${keyList}.
 Use an empty string "" for anything not clearly legible on the label. Do not guess or invent details. Return the JSON and nothing else.`;
 
+  const headers = {
+    "content-type": "application/json",
+    "x-api-key": getKey(),
+    "anthropic-version": "2023-06-01",
+    "anthropic-dangerous-direct-browser-access": "true",
+  };
+  // Org-level keys aren't tied to a workspace and need this header.
+  const ws = getWorkspace();
+  if (ws) headers["anthropic-workspace-id"] = ws;
+
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": getKey(),
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
+    headers,
     body: JSON.stringify({
       model: getModel(),
       max_tokens: 1024,
@@ -225,6 +232,7 @@ Use an empty string "" for anything not clearly legible on the label. Do not gue
     let msg = "HTTP " + res.status;
     try { const j = await res.json(); if (j.error?.message) msg = j.error.message; } catch {}
     if (res.status === 401) msg = "API key rejected — check it in Settings";
+    if (/workspace/i.test(msg)) msg += " \u2014 paste your Workspace ID in Settings and try again";
     throw new Error(msg);
   }
   const data = await res.json();
@@ -240,12 +248,14 @@ Use an empty string "" for anything not clearly legible on the label. Do not gue
 function openSettings() {
   $("set-apikey").value = getKey();
   $("set-model").value = getModel();
+  $("set-workspace").value = getWorkspace();
   $("count-line").textContent = `${loadBottles().length} bottle(s) stored on this device.`;
   show("settings");
 }
 function saveSettings() {
   localStorage.setItem(LS.apikey, $("set-apikey").value.trim());
   localStorage.setItem(LS.model, ($("set-model").value.trim() || DEFAULT_MODEL));
+  localStorage.setItem(LS.workspace, $("set-workspace").value.trim());
   toast("Settings saved");
   show("list");
 }
