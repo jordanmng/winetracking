@@ -29,6 +29,7 @@ const LS = {
   sheetUrl: "cellar:sheeturl",
   sheetSecret: "cellar:sheetsecret",
   pending: "cellar:pending",
+  synced: "cellar:synced",
 };
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
@@ -316,6 +317,19 @@ Use an empty string "" for anything not clearly legible. Do not guess or invent 
    never blocks on the network. Anything that fails to send is queued in
    LS.pending and retried. On a clean queue we pull, and the sheet wins. */
 
+function loadSynced() {
+  try { const s = JSON.parse(localStorage.getItem(LS.synced) || "[]"); return Array.isArray(s) ? s : []; }
+  catch { return []; }
+}
+function setSynced(ids) {
+  try { localStorage.setItem(LS.synced, JSON.stringify([...new Set(ids)])); } catch {}
+}
+function markSynced(id, on) {
+  const s = new Set(loadSynced());
+  if (on) s.add(id); else s.delete(id);
+  setSynced([...s]);
+}
+
 function loadPending() {
   try { const p = JSON.parse(localStorage.getItem(LS.pending) || "{}"); return p && typeof p === "object" ? p : {}; }
   catch { return {}; }
@@ -365,10 +379,12 @@ async function flushPending() {
     try {
       if (p[id] === "delete") {
         await sheetCall({ action: "delete", id });
+        markSynced(id, false);
       } else {
         const b = list.find((x) => x.id === id);
         if (!b) { clearPending(id); continue; }
         await sheetCall({ action: "upsert", bottle: b });
+        markSynced(id, true);
       }
       clearPending(id);
       sent++;
@@ -380,9 +396,26 @@ async function flushPending() {
 async function pullSheet() {
   const data = await sheetCall({ action: "list" });
   const rows = (data.bottles || []).filter((b) => b && b.id);
-  saveBottles(rows);
+  const onSheet = new Set(rows.map((b) => b.id));
+  const known = new Set(loadSynced());          // ids the sheet has held before
+  const local = loadBottles();
+
+  // A local bottle missing from the sheet means one of two very different
+  // things. If the sheet has held it before, it was deleted there and should
+  // go here too. If it never has, it simply hasn't been sent yet — pushing it
+  // up is right, and replacing it with nothing would be data loss.
+  const unsent = local.filter((b) => !onSheet.has(b.id) && !known.has(b.id));
+
+  saveBottles(rows.concat(unsent));
+  setSynced([...onSheet]);
   renderList();
-  return rows.length;
+
+  if (unsent.length) {
+    for (const b of unsent) setPending(b.id, "upsert");
+    await flushPending();
+    renderList();
+  }
+  return { total: rows.length + unsent.length, pushed: unsent.length };
 }
 
 async function syncNow(silent) {
@@ -395,8 +428,12 @@ async function syncNow(silent) {
       if (!silent) toast("Some changes couldn't be sent \u2014 still saved here");
       return;
     }
-    const n = await pullSheet();
-    if (!silent) toast(`Synced \u2014 ${n} bottle(s) from the sheet`);
+    const { total, pushed } = await pullSheet();
+    if (!silent) {
+      toast(pushed
+        ? `Synced \u2014 ${total} bottle(s), ${pushed} sent up`
+        : `Synced \u2014 ${total} bottle(s) from the sheet`);
+    }
   } catch (err) {
     if (!silent) toast("Sync failed: " + (err.message || err));
   } finally {
@@ -419,11 +456,21 @@ function updateSyncLine() {
   el.textContent = n ? `${n} change(s) waiting to reach the sheet.` : "Everything is on the sheet.";
 }
 
+/* Saves the sheet fields from the Settings form. Connecting a sheet for the
+   first time queues everything already on the device: those bottles have
+   never been sent, so without this the first pull would replace them with an
+   empty sheet. */
+function rememberSheet() {
+  const hadSheet = sheetOn();
+  localStorage.setItem(LS.sheetUrl, $("set-sheeturl").value.trim());
+  localStorage.setItem(LS.sheetSecret, $("set-sheetsecret").value.trim());
+  if (!hadSheet && sheetOn()) for (const b of loadBottles()) setPending(b.id, "upsert");
+}
+
 async function testSheet() {
   const btn = $("sheet-test");
   const out = $("sheet-result");
-  localStorage.setItem(LS.sheetUrl, $("set-sheeturl").value.trim());
-  localStorage.setItem(LS.sheetSecret, $("set-sheetsecret").value.trim());
+  rememberSheet();
   btn.disabled = true;
   const was = btn.textContent;
   btn.textContent = "Testing\u2026";
@@ -457,8 +504,7 @@ function saveSettings() {
   localStorage.setItem(LS.apikey, $("set-apikey").value.trim());
   localStorage.setItem(LS.model, ($("set-model").value.trim() || DEFAULT_MODEL));
   localStorage.setItem(LS.workspace, $("set-workspace").value.trim());
-  localStorage.setItem(LS.sheetUrl, $("set-sheeturl").value.trim());
-  localStorage.setItem(LS.sheetSecret, $("set-sheetsecret").value.trim());
+  rememberSheet();
   toast("Settings saved");
   show("list");
 }
