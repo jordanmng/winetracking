@@ -26,6 +26,9 @@ const LS = {
   apikey:  "cellar:apikey",
   model:   "cellar:model",
   workspace: "cellar:workspace",
+  sheetUrl: "cellar:sheeturl",
+  sheetSecret: "cellar:sheetsecret",
+  pending: "cellar:pending",
 };
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
@@ -50,6 +53,9 @@ function saveBottles(list) {
 const getKey   = () => localStorage.getItem(LS.apikey) || "";
 const getModel = () => localStorage.getItem(LS.model) || DEFAULT_MODEL;
 const getWorkspace = () => localStorage.getItem(LS.workspace) || "";
+const getSheetUrl    = () => localStorage.getItem(LS.sheetUrl) || "";
+const getSheetSecret = () => localStorage.getItem(LS.sheetSecret) || "";
+const sheetOn        = () => !!getSheetUrl();
 
 /* ------------------------------ dom ------------------------------- */
 const $ = (id) => document.getElementById(id);
@@ -137,25 +143,31 @@ function openConfirm(extracted) {
 function saveEdit() {
   const data = readForm();
   const list = loadBottles();
+  const now = new Date().toISOString();
+  let id = null;
   if (editingId) {
     const i = list.findIndex((b) => b.id === editingId);
-    if (i >= 0) list[i] = { ...list[i], ...data };
+    if (i >= 0) { list[i] = { ...list[i], ...data, updated_at: now }; id = editingId; }
   } else {
-    list.push({ id: uid(), date_added: new Date().toISOString(), ...data });
+    id = uid();
+    list.push({ id, date_added: now, ...data, updated_at: now });
   }
   saveBottles(list);
   renderList();
   show("list");
   toast(editingId ? "Updated" : "Saved to cellar");
+  queue(id, "upsert");
 }
 
 function deleteBottle() {
   if (!editingId) return;
   if (!confirm("Delete this bottle?")) return;
-  saveBottles(loadBottles().filter((b) => b.id !== editingId));
+  const gone = editingId;
+  saveBottles(loadBottles().filter((b) => b.id !== gone));
   renderList();
   show("list");
   toast("Deleted");
+  queue(gone, "delete");
 }
 
 /* ------------------------- label reading -------------------------- */
@@ -299,11 +311,145 @@ Use an empty string "" for anything not clearly legible. Do not guess or invent 
   return clean;
 }
 
+/* ------------------------- google sheet --------------------------- */
+/* The sheet is the catalog; localStorage is a local-first cache so capture
+   never blocks on the network. Anything that fails to send is queued in
+   LS.pending and retried. On a clean queue we pull, and the sheet wins. */
+
+function loadPending() {
+  try { const p = JSON.parse(localStorage.getItem(LS.pending) || "{}"); return p && typeof p === "object" ? p : {}; }
+  catch { return {}; }
+}
+function setPending(id, op) {
+  const p = loadPending(); p[id] = op;
+  try { localStorage.setItem(LS.pending, JSON.stringify(p)); } catch {}
+}
+function clearPending(id) {
+  const p = loadPending(); delete p[id];
+  try { localStorage.setItem(LS.pending, JSON.stringify(p)); } catch {}
+}
+
+// Content-Type text/plain keeps this a "simple" request, so the browser sends
+// no CORS preflight — Apps Script does not answer OPTIONS.
+async function sheetCall(payload, timeout = 20000) {
+  if (!sheetOn()) throw new Error("No sheet URL set");
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeout);
+  try {
+    const res = await fetch(getSheetUrl(), {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ secret: getSheetSecret(), ...payload }),
+      signal: ctl.signal,
+      redirect: "follow",
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error("timed out");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function flushPending() {
+  const p = loadPending();
+  const ids = Object.keys(p);
+  if (!ids.length) return { sent: 0, failed: 0 };
+  const list = loadBottles();
+  let sent = 0, failed = 0;
+  for (const id of ids) {
+    try {
+      if (p[id] === "delete") {
+        await sheetCall({ action: "delete", id });
+      } else {
+        const b = list.find((x) => x.id === id);
+        if (!b) { clearPending(id); continue; }
+        await sheetCall({ action: "upsert", bottle: b });
+      }
+      clearPending(id);
+      sent++;
+    } catch { failed++; }
+  }
+  return { sent, failed };
+}
+
+async function pullSheet() {
+  const data = await sheetCall({ action: "list" });
+  const rows = (data.bottles || []).filter((b) => b && b.id);
+  saveBottles(rows);
+  renderList();
+  return rows.length;
+}
+
+async function syncNow(silent) {
+  if (!sheetOn()) return;
+  try {
+    const { failed } = await flushPending();
+    // Don't pull while local edits are still unsent: the sheet would win and
+    // quietly discard them.
+    if (failed) {
+      if (!silent) toast("Some changes couldn't be sent \u2014 still saved here");
+      return;
+    }
+    const n = await pullSheet();
+    if (!silent) toast(`Synced \u2014 ${n} bottle(s) from the sheet`);
+  } catch (err) {
+    if (!silent) toast("Sync failed: " + (err.message || err));
+  } finally {
+    updateSyncLine();
+  }
+}
+
+function queue(id, op) {
+  if (!id || !sheetOn()) return;
+  setPending(id, op);
+  flushPending().then(updateSyncLine).catch(() => {});
+}
+
+function updateSyncLine() {
+  const el = $("sheet-result");
+  if (!el) return;
+  const n = Object.keys(loadPending()).length;
+  if (!sheetOn()) { el.className = "hint"; el.textContent = ""; return; }
+  el.className = n ? "hint err" : "hint ok";
+  el.textContent = n ? `${n} change(s) waiting to reach the sheet.` : "Everything is on the sheet.";
+}
+
+async function testSheet() {
+  const btn = $("sheet-test");
+  const out = $("sheet-result");
+  localStorage.setItem(LS.sheetUrl, $("set-sheeturl").value.trim());
+  localStorage.setItem(LS.sheetSecret, $("set-sheetsecret").value.trim());
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = "Testing\u2026";
+  out.className = "hint";
+  out.textContent = "Calling the sheet\u2026";
+  try {
+    const data = await sheetCall({ action: "ping" });
+    out.className = "hint ok";
+    out.textContent = `Connected. The sheet holds ${data.count} bottle(s).`;
+  } catch (err) {
+    out.className = "hint err";
+    out.textContent = "Couldn't reach the sheet: " + (err.message || err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = was;
+  }
+}
+
 /* ---------------------------- settings ---------------------------- */
 function openSettings() {
   $("set-apikey").value = getKey();
   $("set-model").value = getModel();
   $("set-workspace").value = getWorkspace();
+  $("set-sheeturl").value = getSheetUrl();
+  $("set-sheetsecret").value = getSheetSecret();
+  updateSyncLine();
   $("count-line").textContent = `${loadBottles().length} bottle(s) stored on this device.`;
   show("settings");
 }
@@ -311,6 +457,8 @@ function saveSettings() {
   localStorage.setItem(LS.apikey, $("set-apikey").value.trim());
   localStorage.setItem(LS.model, ($("set-model").value.trim() || DEFAULT_MODEL));
   localStorage.setItem(LS.workspace, $("set-workspace").value.trim());
+  localStorage.setItem(LS.sheetUrl, $("set-sheeturl").value.trim());
+  localStorage.setItem(LS.sheetSecret, $("set-sheetsecret").value.trim());
   toast("Settings saved");
   show("list");
 }
@@ -426,6 +574,8 @@ $("settings-save").onclick = saveSettings;
 $("edit-cancel").onclick = () => show("list");
 $("edit-save").onclick = saveEdit;
 $("edit-delete").onclick = deleteBottle;
+$("sheet-test").onclick = testSheet;
+$("sheet-sync").onclick = () => syncNow(false);
 $("export-csv").onclick = exportCSV;
 $("export-json").onclick = exportJSON;
 $("import-btn").onclick = () => $("import-file").click();
@@ -434,6 +584,7 @@ $("import-file").onchange = (e) => { if (e.target.files[0]) importFile(e.target.
 renderList();
 show("list");
 if (!getKey()) toast("Add your API key in Settings to read labels");
+if (sheetOn()) syncNow(true);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));

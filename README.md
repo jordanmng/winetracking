@@ -18,22 +18,33 @@ full-screen with the camera one tap away.
 
 ## Where the data lives
 
-Everything is stored **on your device**, in the browser (`localStorage`) —
-no server, no account, nothing leaves your phone except the one label photo
-that's sent to Anthropic to read the text (and that photo isn't saved
-anywhere).
+The catalog lives in **a Google Sheet in your own Drive**, so you can open it
+from any device, sort it, edit it by hand, or add a column. The app keeps a
+copy on the device as well, which is what makes capture instant and lets it
+work with no signal — anything that can't be sent is queued and retried.
 
-There's no Google Sheets connector available in this project, so rather than
-build against one we kept the catalog self-contained and portable:
+If you never connect a sheet, the app still works exactly as before: everything
+stays on the device, with CSV/JSON export and import.
 
-- **Export CSV** — open it in Google Sheets / Excel, edit by hand, done.
-- **Export JSON** — a full backup.
-- **Import** — load a CSV or JSON back in (edit in a spreadsheet, re-import).
-  Import merges: rows with a matching `id` are updated, new rows are added,
-  and nothing already on the device is removed.
+**Rules of the road:** the sheet is the source of truth. On open, the app sends
+anything queued and then re-reads the sheet, so a row you edited by hand wins.
+It will not pull while local changes are still unsent, so nothing is quietly
+discarded.
 
-So it stays lightweight and hand-editable, and if you later want it in a real
-Google Sheet, the CSV drops straight in.
+### Connecting the sheet
+
+1. Open your Cellar spreadsheet, then **Extensions → Apps Script**.
+2. Delete the placeholder code and paste in [`sheet/Code.gs`](sheet/Code.gs).
+3. Change `SECRET` at the top to any random string. Save.
+4. **Deploy → New deployment → Web app**, with **Execute as: Me** and
+   **Who has access: Anyone**. Authorize it — Google shows an "unverified app"
+   warning for your own script, so click Advanced and continue.
+5. Copy the `/exec` URL.
+6. In the app: Settings → paste the URL and the same secret → **Test connection**.
+
+"Anyone" means anyone holding that URL can call it, which is why every request
+carries the secret. Keep the URL and secret out of public places — they live in
+the app's settings on your phone, never in this repo.
 
 ## The one setup step: an Anthropic API key
 

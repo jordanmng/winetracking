@@ -74,6 +74,23 @@
           <button type="button" class="btn-primary" id="settings-save">Save</button>
         </div>
         <hr class="rule" />
+        <div class="field-label">Google Sheet</div>
+        <span class="hint">Point the app at a sheet and your catalog lives there instead of only on this phone — open it from anywhere, edit it by hand. Setup instructions are in the repo under <code>sheet/</code>.</span>
+        <label class="field">
+          <span class="field-label">Web app URL</span>
+          <input type="url" id="set-sheeturl" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span class="field-label">Shared secret</span>
+          <input type="password" id="set-sheetsecret" placeholder="the SECRET from your script" autocomplete="off" />
+        </label>
+        <div class="data-actions">
+          <button type="button" class="btn-secondary" id="sheet-test">Test connection</button>
+          <button type="button" class="btn-secondary" id="sheet-sync">Sync now</button>
+        </div>
+        <p class="hint" id="sheet-result"></p>
+
+        <hr class="rule" />
         <div class="field-label">Your data</div>
         <span class="hint">Everything lives on this device, and is tied to the web address you&#39;re using right now. Open the app at a different address and it starts empty, so export here first and import there. Your API key doesn&#39;t travel either.</span>
         <div class="data-actions">

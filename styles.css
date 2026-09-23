@@ -134,3 +134,8 @@ textarea { min-height: 76px; resize: vertical; }
 .sheet-card .btn-primary, .sheet-card .btn-secondary { flex: none; width: 100%; }
 
 .empty .tiny { font-size: 12.5px; line-height: 1.5; max-width: 34ch; margin: 18px auto 0; opacity: .85; }
+
+/* Sheet connection result */
+.hint.ok  { color: var(--ok); font-weight: 600; }
+.hint.err { color: var(--danger); font-weight: 600; }
+code { background: #f3edef; padding: 1px 5px; border-radius: 5px; font-size: 12px; }
