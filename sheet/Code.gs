@@ -23,9 +23,14 @@ var HEADERS = ["id", "date_added", "name", "producer", "vintage", "vineyard",
                "varietal", "country", "abv", "price", "rating", "date",
                "location", "notes", "updated_at"];
 
+/** The tab whose A1 says "id", so adding or reordering tabs can't point the
+    app at the wrong one (an empty tab would read as "everything deleted"). */
 function sheet_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheets()[0];
+  var tabs = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+  for (var i = 0; i < tabs.length; i++) {
+    if (String(tabs[i].getRange(1, 1).getValue()).trim() === "id") return tabs[i];
+  }
+  var sh = tabs[0];
   if (sh.getLastRow() === 0) sh.appendRow(HEADERS);
   return sh;
 }
@@ -54,7 +59,9 @@ function rows_(sh) {
   var last = sh.getLastRow();
   if (last < 2) return [];
   var hs = headers_(sh);
-  var values = sh.getRange(2, 1, last - 1, hs.length).getValues();
+  // Display values: a hand-typed date or 13.5% comes back as the text shown,
+  // not a Date object or 0.135.
+  var values = sh.getRange(2, 1, last - 1, hs.length).getDisplayValues();
   var out = [];
   for (var r = 0; r < values.length; r++) {
     var o = {}, blank = true;
@@ -81,6 +88,7 @@ function doPost(e) {
     return json_({ error: "Sheet busy, try again" });
   }
   try {
+    if (SECRET === "CHANGE-ME") return json_({ error: "Set SECRET in the script first" });
     var req = JSON.parse(e.postData.contents);
     if (String(req.secret) !== String(SECRET)) return json_({ error: "Bad secret" });
 
@@ -93,14 +101,25 @@ function doPost(e) {
     if (req.action === "upsert") {
       var b = req.bottle || {};
       if (!b.id) return json_({ error: "Missing id" });
+      var at = idColumn_(sh).indexOf(String(b.id));
+      var row = at >= 0 ? at + 2 : sh.getLastRow() + 1;
+      var range = sh.getRange(row, 1, 1, hs.length);
+      var old = [];
+      if (at >= 0) {
+        var vals = range.getValues()[0], fx = range.getFormulas()[0];
+        for (var j = 0; j < hs.length; j++) old.push(fx[j] || vals[j]);
+      }
       var line = [];
       for (var i = 0; i < hs.length; i++) {
         var v = b[hs[i]];
-        line.push(v === undefined || v === null ? "" : String(v));
+        // A column the app doesn't know (added by hand) keeps what's there.
+        if (v === undefined) { line.push(old[i] === undefined ? "" : old[i]); continue; }
+        v = v === null ? "" : String(v);
+        // Leading ' stores it as plain text: "13.5%" stays 13.5%, not 0.135,
+        // and label text starting with "=" can't become a formula.
+        line.push(v === "" ? "" : "'" + v);
       }
-      var at = idColumn_(sh).indexOf(String(b.id));
-      if (at >= 0) sh.getRange(at + 2, 1, 1, line.length).setValues([line]);
-      else sh.appendRow(line);
+      range.setValues([line]);
       return json_({ ok: true, updated: at >= 0 });
     }
 

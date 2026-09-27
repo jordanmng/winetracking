@@ -369,26 +369,50 @@ async function sheetCall(payload, timeout = 20000) {
   }
 }
 
-async function flushPending() {
-  const p = loadPending();
-  const ids = Object.keys(p);
-  if (!ids.length) return { sent: 0, failed: 0 };
-  const list = loadBottles();
+// Only the columns the app owns go up, so a column added by hand in the sheet
+// (or a formula in it) is never overwritten with a stale copy.
+const SHEET_COLS = ["id", "date_added", ...FIELDS.map((f) => f.key), "updated_at"];
+function sheetRow(b) {
+  const out = {};
+  for (const c of SHEET_COLS) out[c] = b[c] == null ? "" : b[c];
+  return out;
+}
+
+let flushing = null;   // one flush at a time; a second caller shares the run
+function flushPending() {
+  if (!flushing) flushing = doFlush().finally(() => { flushing = null; });
+  return flushing;
+}
+
+async function doFlush() {
   let sent = 0, failed = 0;
-  for (const id of ids) {
-    try {
-      if (p[id] === "delete") {
-        await sheetCall({ action: "delete", id });
-        markSynced(id, false);
-      } else {
-        const b = list.find((x) => x.id === id);
-        if (!b) { clearPending(id); continue; }
-        await sheetCall({ action: "upsert", bottle: b });
-        markSynced(id, true);
-      }
-      clearPending(id);
-      sent++;
-    } catch { failed++; }
+  const tried = new Set();   // each id gets one attempt per flush unless it changed
+  for (;;) {
+    const p = loadPending();
+    const ids = Object.keys(p).filter((id) => !tried.has(id));
+    if (!ids.length) break;
+    for (const id of ids) {
+      const op = p[id];
+      tried.add(id);
+      const b = op === "delete" ? null : loadBottles().find((x) => x.id === id);
+      try {
+        if (op === "delete") {
+          await sheetCall({ action: "delete", id });
+          markSynced(id, false);
+        } else {
+          if (!b) { clearPending(id); continue; }
+          await sheetCall({ action: "upsert", bottle: sheetRow(b) });
+          markSynced(id, true);
+        }
+        // If the bottle changed while this was in flight, leave it queued so
+        // the newer version goes up on the next pass.
+        const now = loadBottles().find((x) => x.id === id);
+        const same = op === "delete" ? !now : now && now.updated_at === b.updated_at;
+        if (loadPending()[id] === op && same) clearPending(id);
+        else tried.delete(id);
+        sent++;
+      } catch { failed++; }
+    }
   }
   return { sent, failed };
 }
@@ -399,6 +423,7 @@ async function pullSheet() {
   const onSheet = new Set(rows.map((b) => b.id));
   const known = new Set(loadSynced());          // ids the sheet has held before
   const local = loadBottles();
+  const pending = loadPending();                // queued while this pull ran
 
   // A local bottle missing from the sheet means one of two very different
   // things. If the sheet has held it before, it was deleted there and should
@@ -406,7 +431,11 @@ async function pullSheet() {
   // up is right, and replacing it with nothing would be data loss.
   const unsent = local.filter((b) => !onSheet.has(b.id) && !known.has(b.id));
 
-  saveBottles(rows.concat(unsent));
+  // A change made while the pull was in flight beats the sheet's older copy.
+  const kept = rows
+    .filter((r) => pending[r.id] !== "delete")
+    .map((r) => (pending[r.id] ? local.find((b) => b.id === r.id) || r : r));
+  saveBottles(kept.concat(unsent));
   setSynced([...onSheet]);
   renderList();
 
@@ -415,7 +444,7 @@ async function pullSheet() {
     await flushPending();
     renderList();
   }
-  return { total: rows.length + unsent.length, pushed: unsent.length };
+  return { total: kept.length + unsent.length, pushed: unsent.length };
 }
 
 async function syncNow(silent) {
@@ -456,15 +485,18 @@ function updateSyncLine() {
   el.textContent = n ? `${n} change(s) waiting to reach the sheet.` : "Everything is on the sheet.";
 }
 
-/* Saves the sheet fields from the Settings form. Connecting a sheet for the
-   first time queues everything already on the device: those bottles have
-   never been sent, so without this the first pull would replace them with an
-   empty sheet. */
+/* Saves the sheet fields from the Settings form. Connecting a sheet, or
+   pointing at a different one, queues everything already on the device: the
+   new sheet has never held those bottles, so without this the first pull
+   would read them as deleted there and remove them here. */
 function rememberSheet() {
-  const hadSheet = sheetOn();
+  const before = getSheetUrl();
   localStorage.setItem(LS.sheetUrl, $("set-sheeturl").value.trim());
   localStorage.setItem(LS.sheetSecret, $("set-sheetsecret").value.trim());
-  if (!hadSheet && sheetOn()) for (const b of loadBottles()) setPending(b.id, "upsert");
+  if (sheetOn() && getSheetUrl() !== before) {
+    setSynced([]);
+    for (const b of loadBottles()) setPending(b.id, "upsert");
+  }
 }
 
 async function testSheet() {
