@@ -1,0 +1,11 @@
+{
+  "name": "cellar",
+  "private": true,
+  "description": "Tests only. The app itself is plain static files with no build step.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

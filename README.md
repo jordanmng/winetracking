@@ -81,7 +81,24 @@ All fields are defined in one array at the top of `app.js` (`FIELDS`). Add a
 line there and it shows up in the form, the list, and the CSV automatically.
 Set `fromLabel: true` if the label reader should try to fill it.
 
+## Tests
+
+A handful of browser tests cover the parts that have actually broken: sheet
+sync, CSV import, and filling the form from a label read. The Google Sheet and
+the Anthropic API are faked, so the tests need no keys and cost nothing.
+
+```
+npm install
+npx playwright install chromium
+npm test
+```
+
+GitHub Actions runs them on every pull request and before every deploy; a
+push to `main` that fails them doesn't go live.
+
 ## Files
 
 - `index.html` / `styles.css` / `app.js` — the app
 - `manifest.webmanifest` / `sw.js` / `icons/` — PWA (installable, offline shell)
+- `sheet/Code.gs` — the Apps Script that stores the catalog in your Google Sheet
+- `tests/` — browser tests (`npm test`)
