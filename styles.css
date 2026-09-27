@@ -139,3 +139,4 @@ textarea { min-height: 76px; resize: vertical; }
 .hint.ok  { color: var(--ok); font-weight: 600; }
 .hint.err { color: var(--danger); font-weight: 600; }
 code { background: #f3edef; padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+.normal { font-weight: 400; }
